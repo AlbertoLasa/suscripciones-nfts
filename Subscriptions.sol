@@ -24,8 +24,8 @@ contract Subscriptions is ERC721, IERC5643, ERC721Enumerable, ERC721URIStorage, 
     using Counters for Counters.Counter;
     Counters.Counter private s_tokenIdCounter;
 
-    mapping(uint256 => uint64) private s_expirations;
-    mapping(uint256 => bool) private s_notRenewable;
+    mapping(uint256 => uint64) private s_expirationTimeStamps;
+    mapping(uint256 => uint64) private s_renewableTimeStamps;
     mapping(uint256 => uint256) public s_valuesOneSecond;
 
     mapping(bytes => bool) private s_signatures; 
@@ -59,7 +59,7 @@ contract Subscriptions is ERC721, IERC5643, ERC721Enumerable, ERC721URIStorage, 
     }
 
     function expiresAt(uint256 tokenId) public view override returns(uint64) {
-        return s_expirations[tokenId];
+        return s_expirationTimeStamps[tokenId];
     }
 
     // => Set functions
@@ -75,7 +75,7 @@ contract Subscriptions is ERC721, IERC5643, ERC721Enumerable, ERC721URIStorage, 
         address p_to, 
         string memory p_uri, 
         uint64 p_duration, 
-        bool p_renewable, 
+        uint64 p_renewable, 
         uint256 p_value,
         uint256 p_timeStamp,
         bytes memory p_signature
@@ -93,8 +93,8 @@ contract Subscriptions is ERC721, IERC5643, ERC721Enumerable, ERC721URIStorage, 
         s_tokenIdCounter.increment();
 
         s_valuesOneSecond[tokenId] = msg.value / p_duration;
-        s_expirations[tokenId] = uint64(block.timestamp) + p_duration;
-        if (!p_renewable) { s_notRenewable[tokenId] = true; }
+        s_expirationTimeStamps[tokenId] = uint64(block.timestamp) + p_duration;
+        s_renewableTimeStamps[tokenId] = uint64(block.timestamp) + p_renewable;
 
         _safeMint(p_to, tokenId);
         _setTokenURI(tokenId, p_uri);
@@ -102,20 +102,19 @@ contract Subscriptions is ERC721, IERC5643, ERC721Enumerable, ERC721URIStorage, 
 
     function renewSubscription(uint256 tokenId, uint64 duration) public payable override {
         require(_isApprovedOrOwner(msg.sender, tokenId), "Caller is not owner nor approved");
-        require(s_expirations[tokenId] <= uint64(block.timestamp), "Subscription expired");
 
         payable(owner()).transfer(s_valuesOneSecond[tokenId] * duration);
 
-        uint64 currentExpiration = s_expirations[tokenId];
+        uint64 currentExpiration = s_expirationTimeStamps[tokenId];
         uint64 newExpiration;
         if (currentExpiration == 0 || currentExpiration <= uint64(block.timestamp)) {
-            if (s_notRenewable[tokenId]) { revert('Not renewable'); }
+            if (s_renewableTimeStamps[tokenId] < uint64(block.timestamp)) { revert('Not renewable'); }
             newExpiration = uint64(block.timestamp) + duration;
         } else {
             newExpiration = currentExpiration + duration;
         }
 
-        s_expirations[tokenId] = newExpiration;
+        s_expirationTimeStamps[tokenId] = newExpiration;
 
         emit SubscriptionUpdate(tokenId, newExpiration);
     }
@@ -123,23 +122,15 @@ contract Subscriptions is ERC721, IERC5643, ERC721Enumerable, ERC721URIStorage, 
     function cancelSubscription(uint256 tokenId) public payable override {
         require(_isApprovedOrOwner(msg.sender, tokenId) || msg.sender == owner(), "Caller is not owner nor approved");
 
-        delete s_expirations[tokenId];
-        delete s_notRenewable[tokenId];
+        delete s_expirationTimeStamps[tokenId];
+        delete s_renewableTimeStamps[tokenId];
         delete s_valuesOneSecond[tokenId];
 
         emit SubscriptionUpdate(tokenId, 0);
     }
 
     function isRenewable(uint256 tokenId) public view override returns(bool) {
-        return s_notRenewable[tokenId] == false;
-    }
-
-    function notRenewable(uint256 p_tokenId) public onlyOwner {
-        s_notRenewable[p_tokenId] = true;
-    }
-
-    function renewable(uint256 p_tokenId) public onlyOwner {
-        delete s_notRenewable[p_tokenId];
+        return s_renewableTimeStamps[tokenId] >= uint64(block.timestamp);
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -160,8 +151,8 @@ contract Subscriptions is ERC721, IERC5643, ERC721Enumerable, ERC721URIStorage, 
     function _burn(uint256 tokenId) internal override(ERC721, ERC721URIStorage) {
         super._burn(tokenId);
 
-        delete s_expirations[tokenId];
-        delete s_notRenewable[tokenId];
+        delete s_expirationTimeStamps[tokenId];
+        delete s_renewableTimeStamps[tokenId];
         delete s_valuesOneSecond[tokenId];
     }
 
