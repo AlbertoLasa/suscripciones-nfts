@@ -83,7 +83,7 @@ contract Subscriptions is ERC721, IERC5643, ERC721Enumerable, ERC721URIStorage, 
         bytes32 message = keccak256(abi.encodePacked(p_to, p_uri, p_duration, p_renewable, p_value, p_timeStamp, address(this)));
         require(!s_signatures[p_signature], "Error signature");
         require(owner() == _recoverSigner(message, p_signature), "Error signature signer");
-        require(p_timeStamp <= block.timestamp + 5 minutes, "Error signature time");
+        require(p_timeStamp + 5 minutes <= block.timestamp, "Error signature time");
         s_signatures[p_signature] = true;
 
         require(msg.value == p_value, "Error value");
